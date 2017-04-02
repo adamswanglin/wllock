@@ -1,0 +1,17 @@
+wllock:
+    systemName: wl
+    lockTimeMaxMillis: 10000
+    singleWaitThreshold: 500
+spring:
+  profiles: default
+  # Redis profile specific configuration
+  redis:
+    host: localhost
+    port: 6379
+    maxTotal: 400
+    minIdle: 0
+    maxIdle: 20
+logging:
+  config: classpath:logback.xml
+  level:
+    ROOT: INFO

@@ -1,0 +1,39 @@
+buildscript {
+	ext {
+		springBootVersion = '1.5.2.RELEASE'
+	}
+	repositories {
+		mavenCentral()
+	}
+	dependencies {
+		classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+	}
+}
+
+apply plugin: 'java'
+apply plugin: 'maven'
+apply plugin: 'org.springframework.boot'
+version = '0.0.1-SNAPSHOT'
+group = 'org.wl'
+archivesBaseName = 'wllock'
+
+
+repositories {
+	mavenCentral()
+}
+
+
+dependencies {
+	compile('org.springframework.boot:spring-boot-starter')
+	compile ('org.springframework.boot:spring-boot-starter-redis:1.2.3.RELEASE')
+	compile('org.springframework.boot:spring-boot-starter-aop')
+	compile('com.google.code.gson:gson:2.8.0')
+	testCompile('org.springframework.boot:spring-boot-starter-test')
+}
+uploadArchives {
+	repositories {
+		mavenDeployer {
+			repository(url: "file:C:\\Users\\yeye\\.m2\\repository")
+		}
+	}
+}
