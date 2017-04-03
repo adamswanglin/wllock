@@ -32,6 +32,13 @@ public class LockAspect {
     private LocalLock localLock;
 
 
+    /***
+     * 加锁aspect
+     * @param joinPoint 连接点
+     * @param lockAnnotation 方法需要带注解 例如LockGuard(name="product")
+     * @param lockValue 方法第一个参数是 LockValue
+     * @throws Throwable
+     */
     @Around("@annotation(lockAnnotation) && args(lockValue, ..)")
     public void aroundAction(JoinPoint joinPoint, LockGuard lockAnnotation, LockValue lockValue) throws Throwable {
         String key = lockSettings.getSystemName() + ":" + lockAnnotation.name() + ":" + lockValue.getKey();
@@ -67,7 +74,7 @@ public class LockAspect {
     /**
      * 获取本地锁和分布式锁
      *
-     * @param key          分布式锁key
+     * @param key          锁id
      * @param milliSeconds 限时 ms
      * @return
      * @throws InterruptedException
@@ -87,6 +94,7 @@ public class LockAspect {
             }
         }
         long distribute = System.currentTimeMillis();
+        //记录锁详细信息
         lockDetail.setLocalLockResult(localLockResult);
         lockDetail.setLocalLock(localLockResult.isLockSuccess());
         lockDetail.setDistributionLock(distributionLockSuccess);

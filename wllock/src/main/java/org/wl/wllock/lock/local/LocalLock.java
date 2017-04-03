@@ -22,8 +22,15 @@ public class LocalLock {
     private static final ConcurrentHashMap<String, ReentrantLock> LOCK_MAP = new ConcurrentHashMap<>();
     private static final Logger LOGGER = LoggerFactory.getLogger(LockAspect.class);
 
+    /**
+     * 获取本地锁
+     *
+     * @param key             锁id
+     * @param tryMilliSeconds 最大等待时长
+     * @return 锁结果
+     */
     public LocalLockResult tryLock(String key, int tryMilliSeconds) {
-        //获取信号量
+        //获取ReentrantLock
         LocalLockResult localLockResult = new LocalLockResult();
         ReentrantLock reentrantLock = LOCK_MAP.get(key);
         if (reentrantLock == null) {
@@ -35,7 +42,7 @@ public class LocalLock {
         }
         localLockResult.setLock(reentrantLock);
         if (reentrantLock.getQueueLength() <= lockSettings.getSingleWaitThreshold()) {
-            //先获取本地锁
+            //获取本地锁
             try {
                 if (tryMilliSeconds > 0) {
                     if (reentrantLock.tryLock(tryMilliSeconds, TimeUnit.MILLISECONDS)) {
@@ -52,9 +59,17 @@ public class LocalLock {
         return localLockResult;
     }
 
+    /**
+     * 释放本地锁
+     *
+     * @param key             锁id
+     * @param localLockResult 锁结果
+     */
     public void unlock(String key, LocalLockResult localLockResult) {
-        if (localLockResult != null && localLockResult.isLockSuccess() && localLockResult.getLock() != null) {
-            localLockResult.getLock().unlock();
+        if (localLockResult != null && localLockResult.getLock() != null) {
+            if (localLockResult.isLockSuccess()) {
+                localLockResult.getLock().unlock();
+            }
 
             //当前key没有线程等待锁，删除
             if (!localLockResult.getLock().hasQueuedThreads()) {
