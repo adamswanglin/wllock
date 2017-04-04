@@ -1,9 +1,9 @@
-#1. 解决什么问题
-考虑分布式商品秒杀系统，如何保证商品数量不超卖？加锁呗，一般会这样想：
+# 1. 分布式锁相关
+考虑分布式商品秒杀系统，库存量较少的商品，如何保证商品数量不超卖？
+其实需要保证这种一致性：某个人点击秒杀后系统中查出来的库存量和实际扣减库存时库存量的一致性就可以。Java中有synchronize关键字，可以保证这种一致性，但这种一致性是单JVM实例中的一致性。
+对于如何保证分布式系统中数据的一致性，一般是使用对分布式系统可见的锁来实现。
 
-
-
-## 1.1.  MySQL乐观锁和悲观锁
+## 1.1  MySQL乐观锁和悲观锁
 
 #### 乐观锁和悲观锁的实现
 
@@ -65,9 +65,12 @@ private boolean isSuccess(int productId) {
 
 乐观锁的思路一般是表中增加版本字段，更新时where语句中增加版本的判断，算是一种CAS（Compare And Swep）操作，商品库存场景中number起到了版本控制的作用（ `and number=#{product.getNumber}`）。悲观锁之所以是悲观，在于他认为外面的世界太复杂，所以一开始就对商品加上锁（`select ... for update`），后面可以安心的做判断和更新，因为这时候不会有别人更新这条商品库存。
 
-#### MySQL乐观锁并不乐观
 
-商品库存表中数量作为版本控制的特殊性，所以给商品库存加乐观锁可以简化为注释中更简洁的写法。在一般场景中我并不推荐用MySQL的乐观锁，因为他并不乐观：在`excute("update product_stock set number=number-1 where product_id=#{productId} and number=#{product.getNumber}")`执行之后，即使商品数量在更新前发生了变化，更新数量为0，MySQL也会给`product_stock`的`product_id`索引加锁；这里的while循环执行不会超过3次。乐观锁是希望在不加锁(不阻塞)的情况下实现更新，显然MySQL做不到。
+
+> 商品库存表中数量作为版本控制的特殊性，所以给商品库存加乐观锁可以简化为注释中更简洁的写法。在`excute("update product_stock set number=number-1 where product_id=#{productId} and number=#{product.getNumber}")`执行之后，即使商品数量在更新前发生了变化，更新数量为0，MySQL也会给`product_stock`的`product_id`索引加锁；这里的while循环执行不会超过3次。乐观锁是需要加上id+version的联合索引的，否则做不到在不加锁(不阻塞)的情况下实现更新。
+>
+
+
 
 ## 1.2 分布式锁
 
@@ -124,6 +127,8 @@ public void unlock(String key) {
 }
 ```
 
+
+
 ## 1.3 存在的问题
 
 在低并发下，上面的两种解决方案都没有什么问题，但在应对类似秒杀应用的高并发场景下，上面的解决方案存在的问题：
@@ -136,19 +141,106 @@ public void unlock(String key) {
 
    redis作为高性能的缓存系统，数据层并不存在太大问题。而对于应用层的每个节点来说，高并发下大量线程在运行获取锁的操作，每次其实只会有一个线程处于得到锁的状态；也就是说某一有很多线程运行着无意义的循环，浪费CPU时间。
 
-#2. 我的方案
+# 2. 我的方案
+详见github
+[github地址]: https://github.com/adamswanglin/wllock	"github"
 
 ### 2.1 简介
 
 对于单个系统实例而言，不要做过多无谓的循环，每次派一个线程代表和其它系统实例竞争这把锁，其它线程等待。简单的画个图和普通的分布式锁比较下：
 
-//TODO
+![绘图1](http://github.com/adamswanglin/wllock/raw/master/README/1.png)
 
-简而言之，单系统里的竞争同一把锁的线程排队，我把实现线程排队的锁叫本地锁；每个单系统派一个线程和其它系统竞争锁，各个系统竞争的叫分布式锁。
+上图中，每个实例中的线程同时争抢锁；下图中每个实例中只有一个线程在争抢锁，其它线程在等待队列中，我把实现线程排队的锁叫本地锁；每个单系统派一个线程和其它系统竞争锁，各个系统竞争的叫分布式锁。
 
-[github地址]: https://github.com/adamswanglin/wllock
+wllock的优势
 
-### 2.2 本地锁实现
+1. 可以限制获取本地锁的队列长度，超过阈值服务降级。
+2. 可以设置获取锁的最长时间，超过时间任未获得所返回获取锁失败。
+3. AOP方式，只需关注业务处理即可。
+
+### 2.2 使用实例
+
+详见github中的example 
+[github地址]: https://github.com/adamswanglin/wllock	"github"
+
+#### 引用jar包
+
+下载wllock包，修改`build.gradle`中`uploadArchives`的`repository(url: "file:**.m2\\repository")`到本地maven库，执行`gradle jar`和`gradle uploadArchives`打jar包到本地maven库。
+
+在你新建的gradle项目中的`build.gradle`中加入依赖`compile ("org.wl:wllock:0.0.1-SNAPSHOT")`
+
+#### 配置锁信息
+
+在`application.yml`中添加配置信息：
+
+`wl.systemName`为当前系统名，将作为redis缓存key值的起始部分。
+
+`wllock.lockTimeMaxMillis`是最长锁定时长，当系统中某个线程获取锁之后如果超过最长锁定时长，系统将自动释放当前线程分布式锁。
+
+`wl.singleWaitThreshold`为单实例最长排队长度，当单实例中等待某个锁的队列长度超过最长排队长度，系统将对后面的进程返回获取锁失败，服务降级。
+
+```groovy
+wllock:
+    systemName: order
+    lockTimeMaxMillis: 10000
+    singleWaitThreshold: 500
+spring:
+  redis:
+    host: localhost
+    port: 6379
+    maxTotal: 400
+    minIdle: 0
+    maxIdle: 20
+```
+
+#### 获取锁代码
+
+```java
+    /**
+     * 下单
+     * @param accountId
+     * @param productId
+     */
+    public void placeOrder(int accountId) {
+        LockValue lockValue = new LockValue(String.valueOf(productId));
+        lockValue.setTryLockMilliSeconds(1000);
+        boolean placeSuccess = placeOrder(lockValue, accountId, 1000);
+        if (placeSuccess) {
+            //返回支付页面
+        } else {
+            //返回失败页面
+        }
+    }
+
+    @LockGuard(name = "product")
+    private boolean placeOrder(LockValue lockValue, int accountId, int productId) throws Exception {
+        if (lockValue.isLockSuccess()) {
+            //扣减库存
+            //下单
+            return true;
+        } else {
+            return false;
+        }
+    }
+```
+
+上面简单演示了下单场景的代码。
+
+需要锁保护的代码需要满足下面的规范：
+
+1. 方法需要添加 `@LockGuard`注解，注解中的`name`表示锁对象的名称。
+2. 方法的第一个入参是`LockValue`类型参数，`LockValue`的构造函数参数是key，可以选择性的设置`TryLockMilliSeconds`。
+
+以上两步后
+
+1. 方法将以`wl.systemName`+`LockGuard.name`+`LockValue.key`为完整的锁id，例如实例中redis中的key值为`order:product:1000`。
+2. 方法中直接通过`lockValue.isLockSuccess()`判断是否获取锁成功，执行完成也无需手动释放锁。
+3. 锁定方法中处理的事情越少越好，即锁时间越小越好，例如实例中返回支付或者返回失败的页面就不用放到锁保护代码中处理。
+
+
+
+### 2.3 本地锁实现
 
 首先，有个静态变量`LOCK_MAP`，`key`值就是锁id，`value`是JUC包下的`ReentrantLock`，线程间的排队就是通过ReentrantLock实现的。
 
@@ -224,7 +316,7 @@ private static final ConcurrentHashMap<String, ReentrantLock> LOCK_MAP = new Con
 
 为防止LOCK_MAP里的key值一直加入，导致内存泄漏，在释放锁的时候会判断当前ReentrantLock是否有排队队列，如果没有说明当前并发量小，可以删掉；需要说明的这个操作并不是线程安全的，也就是说可能存在从MAP中删除ReentrantLock时，ReentrantLock中有新加入的线程在排队，不过这并不影响获取锁。
 
-### 2.3 分布式锁实现
+### 2.4 分布式锁实现
 
 分布式锁就是基于redis的实现，不过增加了等待时长的概念，可以设置超过一定时间自动放弃加锁。
 
@@ -257,7 +349,7 @@ public boolean tryLock(String key, int tryMilliSeconds) {
     }
 ```
 
-### 2.4 AOP的方式实现加锁
+### 2.5 AOP的方式实现加锁
 
 ```java
 
@@ -339,7 +431,5 @@ public boolean tryLock(String key, int tryMilliSeconds) {
     }
 ```
 
-### 2.5 使用方法
 
-详见github中的example
 
