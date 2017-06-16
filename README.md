@@ -1,4 +1,4 @@
-[TOC]
+本文链接：https://adamswanglin.github.io/wllock/
 
 # 1. 分布式锁相关
 
