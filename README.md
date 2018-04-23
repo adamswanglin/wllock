@@ -323,23 +323,41 @@ private static final ConcurrentHashMap<String, ReentrantLock> LOCK_MAP = new Con
 
 分布式锁就是基于redis的实现，不过增加了等待时长的概念，可以设置超过一定时间自动放弃加锁。
 
+通过执行lua脚本实现setNX和expire同时执行，防止分两步执行（setNx执行成功，expire未执行成功）可能导致的死锁。
+
 ```java
 
 /**
- * 获取分布式锁
- *
- * @param key             锁id
- * @param tryMilliSeconds 限定时长
- * @return 锁结果
+ * setNX + expire的lua脚本.
+ * <p>
+ * setNxWithExpire(key, args[1], args[2]).
+ * key
+ * args[1] 值
+ * args[2] 失效时间，单位：毫秒
  */
+private static final String SET_NX_WITH_EXPIRE =
+        "local rst = redis.call('SETNX',KEYS[1],ARGV[1]);"
+                + "if (rst==1) then redis.call('PEXPIRE', KEYS[1], ARGV[2]); end;"
+                + " return rst;";
+
+/**
+ * setNX + expire脚本.
+ */
+private static RedisScript<Long> SET_NX_WITH_EXPIRE_SCRIPT = new DefaultRedisScript<>(SET_NX_WITH_EXPIRE, Long.class);
+    
 public boolean tryLock(String key, int tryMilliSeconds) {
         try {
             long start = System.currentTimeMillis();
             while (true) {
-                if (redisTemplate.opsForValue().setIfAbsent(key, "")) {
-                    redisTemplate.expire(key, lockSettings.getLockTimeMaxMillis(), TimeUnit.MILLISECONDS);
+                List<String> keys = new ArrayList<>(1);
+                keys.add(key);
+                String value = "";
+
+                Long result = redisTemplate.execute(SET_NX_WITH_EXPIRE_SCRIPT, redisTemplate.getStringSerializer(), LONG_SERIALIZER, keys, value, String.valueOf(lockSettings.getLockTimeMaxMillis()));
+                if (result == 1) {
                     return true;
                 }
+
                 long end = System.currentTimeMillis();
                 if (tryMilliSeconds > 0 && tryMilliSeconds < (end - start)) {
                     return false;
