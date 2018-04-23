@@ -33,7 +33,7 @@ dependencies {
 uploadArchives {
 	repositories {
 		mavenDeployer {
-			repository(url: "file:C:\\Users\\yeye\\.m2\\repository")
+			repository(url: "file:/usr/local/maven")
 		}
 	}
 }
